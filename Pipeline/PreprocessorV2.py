@@ -1,18 +1,11 @@
-import os
-import sys
-import glob
 import numpy as np
 import cv2 as cv
-import matplotlib.pyplot as plt
-import seaborn as sns
-from sklearn.preprocessing import LabelEncoder, StandardScaler
-from sklearn.model_selection import train_test_split
-from sklearn.utils import Bunch
-from sklearn.pipeline import Pipeline
+import numpy as np
 from sklearn.base import BaseEstimator, TransformerMixin
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
+from sklearn.utils import Bunch
 
-
-# Custom transformer for cleaning the image (extract hand)
 class HandExtractionTransformer(BaseEstimator, TransformerMixin):
     def __init__(self):
         pass
@@ -21,19 +14,15 @@ class HandExtractionTransformer(BaseEstimator, TransformerMixin):
         return self
 
     def transform(self, X):
-        # X is a list of image file paths
         processed_images = []
-        for image_path in X:
-            image = cv.imread(image_path)
+        for image in X:
             if image is None:
                 continue
-            # Logic to clean the image and extract hand
-            hand = self._extract_hand(image)  # Placeholder for hand extraction logic
+
+            hand = self._extract_hand(image)
             processed_images.append(hand)
 
-            cv.imwrite(image_path, hand)
-
-        return np.array(X)
+        return np.array(processed_images)
 
     def _extract_hand(self, image):
         # Check if the image is loaded successfully
@@ -69,7 +58,6 @@ class HandExtractionTransformer(BaseEstimator, TransformerMixin):
 
         return final_image
 
-# Custom transformer for feature calculation
 class FeatureCalculationTransformer(BaseEstimator, TransformerMixin):
     def __init__(self):
         pass
@@ -83,24 +71,16 @@ class FeatureCalculationTransformer(BaseEstimator, TransformerMixin):
         data = np.empty((0, len(feature_names)), float)
         target = []
 
-        for filename in X:
-            image = cv.imread(filename)
+        for image in X:
             if image is None:
                 continue
-            # load image and blur a bit to suppress noise
-            img = cv.imread(filename)
+
             gray = cv.cvtColor(image, cv.COLOR_BGR2GRAY)
 
             contour = self.getLargestContour(gray)
 
-            # extract features from contour
             features = self.getContourFeatures(contour)
 
-            # extract label from folder name and stor
-            label = filename.split(os.path.sep)[-2]
-            target.append(label)
-
-            # append features to data matrix
             data = np.append(data, np.array([features]), axis=0)
 
         unique_targets = np.unique(target)
@@ -109,16 +89,9 @@ class FeatureCalculationTransformer(BaseEstimator, TransformerMixin):
                         unique_targets=unique_targets,
                         feature_names=feature_names)
 
-        le = LabelEncoder()
-        coded_labels = le.fit_transform(dataset.target)
-
-        (trainX, testX, trainY, testY) = train_test_split(dataset.data, coded_labels, test_size=0.25,
-                                                          stratify=dataset.target, random_state=42)
-
         return dataset
 
     def getContourExtremes(self, contour):
-        """ Return contour extremes as an tuple of 4 tuples """
         # determine the most extreme points along the contour
         left = contour[contour[:, 0].argmin()]
         right = contour[contour[:, 0].argmax()]
@@ -129,7 +102,6 @@ class FeatureCalculationTransformer(BaseEstimator, TransformerMixin):
 
 
     def getConvexityDefects(self, contour):
-        """ Return convexity defects in a contour as an nd.array """
         hull = cv.convexHull(contour, returnPoints=False)
         defects = cv.convexityDefects(contour, hull)
         if defects is not None:
@@ -139,8 +111,6 @@ class FeatureCalculationTransformer(BaseEstimator, TransformerMixin):
 
 
     def getContourFeatures(self, contour):
-        """ Return some contour features
-        """
         # basic contour features
         area = cv.contourArea(contour)
         perimeter = cv.arcLength(contour, True)
@@ -163,53 +133,22 @@ class FeatureCalculationTransformer(BaseEstimator, TransformerMixin):
 
 
     def getLargestContour(self, img_BW):
-        """ Return largest contour in foreground as an nd.array """
         contours, hier = cv.findContours(img_BW.copy(), cv.RETR_EXTERNAL,
                                          cv.CHAIN_APPROX_SIMPLE)
         contour = max(contours, key=cv.contourArea)
 
         return np.squeeze(contour)
 
-def process_images(input_folder, output_folder):
-    # Get image file paths
-    image_paths = [os.path.join(input_folder, img) for img in os.listdir(input_folder) if img.endswith(('.png', '.jpg', '.jpeg'))]
+class PreprocessingPipeline:
+    def process(self, X):
+        pipeline = Pipeline([
+            ('hand_extraction', HandExtractionTransformer()),
+            ('feature_calculation', FeatureCalculationTransformer())
+        ])
 
-    # Define preprocessing pipeline
-    pipeline = Pipeline([
-        ('hand_extraction', HandExtractionTransformer()),
-        ('feature_calculation', FeatureCalculationTransformer())
-    ])
+        dataset = pipeline.fit_transform(X)
 
-    # Fit and transform the data
-    dataset = pipeline.fit_transform(image_paths)
+        scalar = StandardScaler()
+        dataset.data = scalar.fit_transform(dataset.data)
 
-    le = LabelEncoder()
-    coded_labels = le.fit_transform(dataset.target)
-
-    (trainX, testX, trainY, testY) = train_test_split(dataset.data, coded_labels, test_size=0.25,
-                                                      stratify=dataset.target, random_state=42)
-
-    scaler = StandardScaler()
-    trainX = scaler.fit_transform(trainX)
-    testX = scaler.fit_transform(testX)
-
-    print(trainX)
-    print("###############################################################")
-    print("###############################################################")
-    print("###############################################################")
-    print(testX)
-
-    # Save the processed data to the output folder
-    # output_file = os.path.join(output_folder, 'processed_data.npy')
-    # np.save(output_file, transformed_data)
-    # print(f"Processed data saved to {output_file}")
-
-if __name__ == "__main__":
-    sourcePath = input("Source path: ")
-    outputPath = sourcePath + "\\o"
-
-    # Ensure output folder exists
-    os.makedirs(outputPath, exist_ok=True)
-
-    # Process the images
-    process_images(sourcePath, outputPath)
+        return dataset
