@@ -1,0 +1,16 @@
+模型名称 (Model Name): AdaBoost
+测试集准确率 (Test Accuracy): 0.516
+交叉验证准确率 (Cross-Validation Accuracy): 0.673 ± 0.062
+
+分类报告 (Classification Report):
+              precision    recall  f1-score   support
+
+           1       1.00      0.60      0.75       199
+           2       0.00      0.00      0.00       124
+           3       0.33      0.83      0.47       157
+           4       0.00      0.00      0.00       156
+           5       0.57      0.95      0.71       182
+
+    accuracy                           0.52       818
+   macro avg       0.38      0.48      0.39       818
+weighted avg       0.43      0.52      0.43       818

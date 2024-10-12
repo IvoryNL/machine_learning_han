@@ -1,0 +1,16 @@
+模型名称 (Model Name): Stacking
+测试集准确率 (Test Accuracy): 0.632
+交叉验证准确率 (Cross-Validation Accuracy): 0.952 ± 0.060
+
+分类报告 (Classification Report):
+              precision    recall  f1-score   support
+
+           1       0.89      0.60      0.72       199
+           2       0.55      0.86      0.68       124
+           3       0.67      0.82      0.74       157
+           4       0.42      0.65      0.52       156
+           5       1.00      0.33      0.50       182
+
+    accuracy                           0.63       818
+   macro avg       0.71      0.65      0.63       818
+weighted avg       0.73      0.63      0.63       818

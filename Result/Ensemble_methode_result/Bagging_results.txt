@@ -1,0 +1,16 @@
+模型名称 (Model Name): Bagging
+测试集准确率 (Test Accuracy): 0.707
+交叉验证准确率 (Cross-Validation Accuracy): 0.968 ± 0.052
+
+分类报告 (Classification Report):
+              precision    recall  f1-score   support
+
+           1       0.99      0.82      0.90       199
+           2       0.75      0.97      0.84       124
+           3       0.67      0.82      0.74       157
+           4       0.43      0.65      0.52       156
+           5       1.00      0.35      0.51       182
+
+    accuracy                           0.71       818
+   macro avg       0.77      0.72      0.70       818
+weighted avg       0.79      0.71      0.70       818

@@ -1,0 +1,16 @@
+模型名称 (Model Name): Voting
+测试集准确率 (Test Accuracy): 0.598
+交叉验证准确率 (Cross-Validation Accuracy): 0.952 ± 0.073
+
+分类报告 (Classification Report):
+              precision    recall  f1-score   support
+
+           1       0.80      0.66      0.73       199
+           2       0.56      0.68      0.61       124
+           3       0.55      0.85      0.67       157
+           4       0.41      0.46      0.43       156
+           5       0.81      0.37      0.51       182
+
+    accuracy                           0.60       818
+   macro avg       0.62      0.60      0.59       818
+weighted avg       0.64      0.60      0.59       818
