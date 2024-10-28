@@ -1,9 +1,7 @@
-import numpy as np
 import cv2 as cv
 import numpy as np
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import StandardScaler, MinMaxScaler
 from sklearn.utils import Bunch
 
 class HandExtractionTransformer(BaseEstimator, TransformerMixin):
@@ -52,15 +50,23 @@ class HandExtractionTransformer(BaseEstimator, TransformerMixin):
         contour_image = np.zeros_like(image, dtype=np.uint8)
         cv.drawContours(contour_image, [largest_contour], -1, 255, cv.FILLED)
 
-        # Determine minY, maxY, minX, maxX
+        # Determine minY, maxY, minX, maxX with 50-pixel offset logic
         image_height = image.shape[0]
         min_y = min(point[0][1] for point in largest_contour)
         max_y = max(point[0][1] for point in largest_contour)
         distance_to_bottom = image_height - max_y
         horizontal_edge_y = 0 if min_y < distance_to_bottom else image_height
 
-        min_x = min(point[0][0] for point in largest_contour)
-        max_x = max(point[0][0] for point in largest_contour)
+        # Initialize minX and maxX based on 50-pixel offset
+        min_x = float('inf')
+        max_x = float('-inf')
+
+        for point in largest_contour:
+            x, y = point[0]
+            if (horizontal_edge_y == 0 and y <= 50) or (y >= image_height - 50):  # Applying 50-pixel offset
+                min_x = min(min_x, x)
+                max_x = max(max_x, x)
+
         center_of_contours_width = min_x + ((max_x - min_x) // 2)
 
         # Find closest points to left and right edges
