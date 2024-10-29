@@ -1,9 +1,7 @@
-import numpy as np
 import cv2 as cv
 import numpy as np
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import StandardScaler
 from sklearn.utils import Bunch
 
 class HandExtractionTransformer(BaseEstimator, TransformerMixin):
@@ -29,34 +27,75 @@ class HandExtractionTransformer(BaseEstimator, TransformerMixin):
         if image is None:
             return
 
-        # Convert BGR image to Lab color space
-        lab = cv.cvtColor(image, cv.COLOR_BGR2Lab)
+        # Apply sharpening filter
+        sharpen_kernel = np.array([[-1, -1, -1],
+                                   [-1, 9, -1],
+                                   [-1, -1, -1]], dtype=np.float32)
+        sharpened = cv.filter2D(image, -1, sharpen_kernel)
 
-        # Split the Lab channels
-        lab_channels = cv.split(lab)
-        A = lab_channels[1]
+        # Apply Gaussian Blur
+        blurred = cv.GaussianBlur(sharpened, (11, 11), 0)
 
-        # Apply Otsu's thresholding on the 'A' channel
-        _, thresh = cv.threshold(A, 70, 235, cv.THRESH_BINARY + cv.THRESH_OTSU)
+        # Detect edges
+        edges = cv.Canny(blurred, 50, 125)
 
-        # Morphological operations
-        kernel_open = cv.getStructuringElement(cv.MORPH_ELLIPSE, (9, 9))
-        result_open = cv.morphologyEx(thresh, cv.MORPH_OPEN, kernel_open)
+        # Dilate edges
+        dilated_edges = cv.dilate(edges, cv.getStructuringElement(cv.MORPH_RECT, (3, 3)), iterations=2)
 
-        kernel_close = cv.getStructuringElement(cv.MORPH_ELLIPSE, (15, 15))
-        result_close = cv.morphologyEx(thresh, cv.MORPH_CLOSE, kernel_close)
+        # Find contours
+        contours, _ = cv.findContours(dilated_edges, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE)
+        largest_contour = max(contours, key=cv.contourArea)
 
-        # Combine the results of the open and close operations
-        morphed_result = cv.bitwise_or(result_open, result_close)
+        # Draw largest contour
+        contour_image = np.zeros_like(image, dtype=np.uint8)
+        cv.drawContours(contour_image, [largest_contour], -1, 255, cv.FILLED)
 
-        # Further improve the result with additional open and close operations
-        improve_with_open = cv.morphologyEx(morphed_result, cv.MORPH_OPEN, kernel_open)
-        final_result = cv.morphologyEx(improve_with_open, cv.MORPH_CLOSE, kernel_close)
+        # Determine minY, maxY, minX, maxX with 50-pixel offset logic
+        image_height = image.shape[0]
+        min_y = min(point[0][1] for point in largest_contour)
+        max_y = max(point[0][1] for point in largest_contour)
+        distance_to_bottom = image_height - max_y
+        horizontal_edge_y = 0 if min_y < distance_to_bottom else image_height
 
-        # Apply the final mask to the original image
-        final_image = cv.bitwise_and(image, image, mask=final_result)
+        # Initialize minX and maxX based on 50-pixel offset
+        min_x = float('inf')
+        max_x = float('-inf')
 
-        return final_image
+        for point in largest_contour:
+            x, y = point[0]
+            if (horizontal_edge_y == 0 and y <= 50) or (y >= image_height - 50):  # Applying 50-pixel offset
+                min_x = min(min_x, x)
+                max_x = max(max_x, x)
+
+        center_of_contours_width = min_x + ((max_x - min_x) // 2)
+
+        # Find closest points to left and right edges
+        closest_point_left_edge = (-1, np.inf if horizontal_edge_y == 0 else -np.inf)
+        closest_point_right_edge = (-1, np.inf if horizontal_edge_y == 0 else -np.inf)
+
+        for point in largest_contour:
+            x, y = point[0]
+            if x < center_of_contours_width:
+                if (horizontal_edge_y == 0 and y < closest_point_left_edge[1]) or (
+                        horizontal_edge_y == image_height and y > closest_point_left_edge[1]):
+                    closest_point_left_edge = (x, y)
+            else:
+                if (horizontal_edge_y == 0 and y < closest_point_right_edge[1]) or (
+                        horizontal_edge_y == image_height and y > closest_point_right_edge[1]):
+                    closest_point_right_edge = (x, y)
+
+        # Draw line between closest points
+        cv.line(contour_image, closest_point_left_edge, closest_point_right_edge, 255, 5)
+
+        # Find contours again on the updated contour image
+        contours, _ = cv.findContours(contour_image, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE)
+        largest_contour = max(contours, key=cv.contourArea)
+
+        # Draw the largest contour in the final result image
+        result = np.zeros_like(image, dtype=np.uint8)
+        cv.drawContours(result, [largest_contour], -1, 255, cv.FILLED)
+
+        return result
 
 class FeatureCalculationTransformer(BaseEstimator, TransformerMixin):
     def __init__(self):
@@ -111,25 +150,28 @@ class FeatureCalculationTransformer(BaseEstimator, TransformerMixin):
 
 
     def getContourFeatures(self, contour):
-        # basic contour features
-        area = cv.contourArea(contour)
-        perimeter = cv.arcLength(contour, True)
-        extremePoints = self.getContourExtremes(contour)
+        try:
+            area = cv.contourArea(contour)
+            perimeter = cv.arcLength(contour, True)
+            extremePoints = self.getContourExtremes(contour)
 
-        equi_diameter = np.sqrt(4 * area / np.pi)
-        defects = self.getConvexityDefects(contour)
+            equi_diameter = np.sqrt(4 * area / np.pi)
+            defects = self.getConvexityDefects(contour)
 
-        defects = defects.squeeze()
-        defects = defects[defects[:, -1] > 10000]
-        total = cv.sumElems(defects[:, -1])[0]
+            defects = defects.squeeze()
+            defects = defects[defects[:, -1] > 10000]
+            total = cv.sumElems(defects[:, -1])[0]
 
-        x, y, w, h = cv.boundingRect(contour)
-        rect_area = w * h
-        extent = float(area) / rect_area
+            x, y, w, h = cv.boundingRect(contour)
+            rect_area = w * h
+            extent = float(area) / rect_area
 
-        features = np.array((area, perimeter, total, extent))
+            features = np.array((area, perimeter, total, extent))
 
-        return (features)
+            return features
+        except Exception as e:
+            print(f"An error occurred: {e}")
+            return None
 
 
     def getLargestContour(self, img_BW):
@@ -147,8 +189,5 @@ class PreprocessingPipeline:
         ])
 
         dataset = pipeline.fit_transform(X)
-
-        scalar = StandardScaler()
-        dataset.data = scalar.fit_transform(dataset.data)
 
         return dataset
