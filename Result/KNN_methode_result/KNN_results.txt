@@ -1,0 +1,19 @@
+Best parameters: {'n_neighbors': 1}
+Best cross-validated F1-score: 0.83
+Accuracy: 0.94
+Precision: 0.94
+Recall: 0.94
+F1 Score: 0.94
+
+Classification Report:
+              precision    recall  f1-score   support
+
+           1       1.00      1.00      1.00        18
+           2       0.86      0.90      0.88        20
+           3       0.91      0.87      0.89        23
+           4       0.95      0.95      0.95        20
+           5       0.96      0.96      0.96        28
+
+    accuracy                           0.94       109
+   macro avg       0.94      0.94      0.94       109
+weighted avg       0.94      0.94      0.94       109
