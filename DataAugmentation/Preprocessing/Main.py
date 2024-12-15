@@ -54,11 +54,7 @@ if __name__ == "__main__":
     epochs = 5
 
     # Create training dataset with augmentations
-    x, y = create_preprocessing_pipeline(
-        source_path=source_path,
-        # num_augmentations_per_image=num_augmentations_per_image,
-        # training=True
-    )
+    x, y = create_preprocessing_pipeline(source_path, True, num_augmentations_per_image)
 
     save_images_to_disk(x, y, source_path=source_path, output_folder_name="Augmented_Results")
 
