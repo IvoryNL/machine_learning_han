@@ -1,8 +1,7 @@
 import os
 import numpy as np
 import tensorflow as tf
-from sympy import false
-
+from tensorflow.keras.utils import to_categorical
 from PreprocessingPipeline import create_preprocessing_pipeline
 from tensorflow.keras import layers, models
 
@@ -44,32 +43,75 @@ def save_images_to_disk(x, y, source_path, output_folder_name="Augmented"):
 
     print(f"Images have been saved to: {augmented_path}")
 
-
-
-
 if __name__ == "__main__":
     source_path = r'D:\Data\0. Machine Learning\0. Mini_project_finger_counting\0. Data\1. New data\Dataset Ivan V3'
     batch_size = 5
-    num_augmentations_per_image = 10
+    num_augmentations_per_image = 50
     epochs = 5
 
     # Create training dataset with augmentations
     x, y = create_preprocessing_pipeline(source_path, True, num_augmentations_per_image)
 
-    save_images_to_disk(x, y, source_path=source_path, output_folder_name="Augmented_Results")
+    # One-hot encode labels
+    num_classes = 6  # Assuming there are 5 classes
+    y = to_categorical(y, num_classes=num_classes)
 
-    # Save augmented data to disk
-    # save_augmented_data(train_ds, source_path)
+    # save_images_to_disk(x, y, source_path=source_path, output_folder_name="Augmented_Results")
 
-    # # Build and train the model
+    # Convert x and y into a tf.data.Dataset
+    dataset = tf.data.Dataset.from_tensor_slices((x, y))
+
+    # Shuffle the dataset
+    dataset = dataset.shuffle(buffer_size=len(x), seed=42)
+
+    # Calculate split sizes
+    dataset_size = len(x)
+    train_size = int(0.8 * dataset_size)
+    test_size = dataset_size - train_size
+
+    # Split into training and test datasets
+    train_ds = dataset.take(train_size).batch(batch_size).prefetch(tf.data.AUTOTUNE)
+    test_ds = dataset.skip(train_size).batch(batch_size).prefetch(tf.data.AUTOTUNE)
+
+    # Build the model with input shape (50, 67, 1)
     # model = tf.keras.Sequential([
-    #     tf.keras.layers.Input(shape=(224, 224, 1)),
+    #     tf.keras.layers.Input(shape=(50, 67, 1)),
     #     tf.keras.layers.Conv2D(32, (3, 3), activation='relu'),
+    #     tf.keras.layers.MaxPooling2D(),
+    #     tf.keras.layers.Conv2D(64, (3, 3), activation='relu'),
     #     tf.keras.layers.MaxPooling2D(),
     #     tf.keras.layers.Flatten(),
     #     tf.keras.layers.Dense(64, activation='relu'),
-    #     tf.keras.layers.Dense(5, activation='softmax')  # assuming 5 classes
+    #     tf.keras.layers.Dense(6, activation='softmax')  # assuming 5 classes
     # ])
-    #
-    # model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
-    # model.fit(train_ds, epochs=epochs)
+
+    # model = tf.keras.Sequential([
+    #     layers.Input(shape=(50, 67, 1)),
+    #     layers.Conv2D(32, (3, 3), activation='relu'),
+    #     layers.MaxPooling2D(),
+    #     layers.Conv2D(64, (3, 3), activation='relu'),
+    #     layers.MaxPooling2D(),
+    #     layers.Conv2D(128, (3, 3), activation='relu'),
+    #     layers.MaxPooling2D(),
+    #     layers.Flatten(),
+    #     layers.Dense(128, activation='relu'),
+    #     layers.Dense(6, activation='softmax')  # Adjust classes if needed
+    # ])
+
+    model = tf.keras.Sequential([
+        layers.Input(shape=(50, 67, 1)),
+        layers.Conv2D(32, (3, 3), activation='relu'),
+        layers.MaxPooling2D(),
+        layers.Conv2D(64, (3, 3), activation='relu'),
+        layers.MaxPooling2D(),
+        layers.Conv2D(128, (3, 3), activation='relu'),
+        layers.MaxPooling2D(),
+        layers.Flatten(),
+        layers.Dense(128, activation='relu'),
+        layers.Dropout(0.5),  # Add dropout to prevent overfitting
+        layers.Dense(6, activation='softmax')  # Adjust for the number of classes
+    ])
+
+    model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
+
+    model.fit(train_ds, epochs=epochs, validation_data=test_ds)
