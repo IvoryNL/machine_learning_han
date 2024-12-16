@@ -1,0 +1,30 @@
+def save_images_to_disk(x, y, source_path, output_folder_name="Augmented"):
+    """
+    Save images and their labels to disk.
+    If y is one-hot encoded, it will be converted to integer labels.
+    """
+    augmented_path = os.path.join(source_path, output_folder_name)
+    os.makedirs(augmented_path, exist_ok=True)
+
+    # Convert one-hot to integer labels if needed
+    if y.ndim > 1 and y.shape[1] > 1:
+        labels = np.argmax(y, axis=1)
+    else:
+        labels = y
+
+    image_counter = {}
+    for i, (img, label) in enumerate(zip(x, labels)):
+        label_folder = os.path.join(augmented_path, str(label))
+        os.makedirs(label_folder, exist_ok=True)
+
+        if label not in image_counter:
+            image_counter[label] = 0
+
+        file_name = f"img_{label}_{image_counter[label]}.jpg"
+        file_path = os.path.join(label_folder, file_name)
+
+        tf.keras.preprocessing.image.save_img(file_path, img, scale=True)
+
+        image_counter[label] += 1
+
+    print(f"Images have been saved to: {augmented_path}")

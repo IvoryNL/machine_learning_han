@@ -1,200 +1,379 @@
 import os
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 import numpy as np
-import keyboard
-import time
-import matplotlib.pyplot as plt
 import tensorflow as tf
-from tensorflow.keras import layers, callbacks, models
-from tensorflow.keras.utils import to_categorical
-from tensorflow.keras import layers, callbacks, optimizers
+from tensorflow.keras import layers, callbacks, models, optimizers
+from sklearn.metrics import confusion_matrix, precision_recall_fscore_support
+import matplotlib.pyplot as plt
+import seaborn as sns
+
 from tensorflow.keras.optimizers.schedules import CosineDecay
 from PreprocessingPipeline import create_preprocessing_pipeline
-
-
-def save_images_to_disk(x, y, source_path, output_folder_name="Augmented"):
-    """
-    Save images and their labels to disk.
-    If y is one-hot encoded, it will be converted to integer labels.
-    """
-
-    augmented_path = os.path.join(source_path, output_folder_name)
-    os.makedirs(augmented_path, exist_ok=True)
-
-    # Convert one-hot to integer labels if needed
-    if y.ndim > 1 and y.shape[1] > 1:
-        labels = np.argmax(y, axis=1)
-    else:
-        labels = y
-
-    # Determine if images are float in [0,1] or already uint8
-    # If your pipeline returns float32 [0,1], we can directly save with scale=True.
-    # If you prefer uint8, uncomment the conversion line below.
-    # X = tf.image.convert_image_dtype(X, dtype=tf.uint8).numpy()
-
-    image_counter = {}
-    for i, (img, label) in enumerate(zip(x, labels)):
-        label_folder = os.path.join(augmented_path, str(label))
-        os.makedirs(label_folder, exist_ok=True)
-
-        if label not in image_counter:
-            image_counter[label] = 0
-
-        file_name = f"img_{label}_{image_counter[label]}.jpg"
-        file_path = os.path.join(label_folder, file_name)
-
-        tf.keras.preprocessing.image.save_img(file_path, img, scale=True)
-
-        image_counter[label] += 1
-
-    print(f"Images have been saved to: {augmented_path}")
 
 if __name__ == "__main__":
     source_path = r'D:\Data\0. Machine Learning\0. Mini_project_finger_counting\0. Data\1. New data\Dataset Ivan V3'
     batch_size = 16
     num_augmentations_per_image = 50
-    epochs = 10
+    epochs = 30
 
     # Create training dataset with augmentations
     x, y = create_preprocessing_pipeline(source_path, True, num_augmentations_per_image)
 
-    # One-hot encode labels
-    num_classes = 6
-    y = to_categorical(y, num_classes=num_classes)
+    # Convert labels from [1..5] to [0..4] for training, then one-hot encode later
+    y_zero_based = y - 1
+    num_classes = 5
 
-    # save_images_to_disk(x, y, source_path=source_path, output_folder_name="Augmented_Results")
-
-    # Convert x and y into a tf.data.Dataset
-    dataset = tf.data.Dataset.from_tensor_slices((x, y))
-
-    # Shuffle the dataset
+    # Create dataset
+    dataset = tf.data.Dataset.from_tensor_slices((x, y_zero_based))
     dataset = dataset.shuffle(buffer_size=len(x), seed=42)
 
-    # Calculate split sizes
+    # Split dataset
     dataset_size = len(x)
     train_size = int(0.8 * dataset_size)
     test_size = dataset_size - train_size
 
-    print(f"Batch size: {batch_size}, Epoch size: {epochs}")
+    print(f"Batch size: {batch_size}, Epochs: {epochs}")
     print(f"Train set size: {train_size}, Test set size: {test_size}")
 
-    # Split into training and test datasets
     train_ds = dataset.take(train_size).batch(batch_size).prefetch(tf.data.AUTOTUNE)
     test_ds = dataset.skip(train_size).batch(batch_size).prefetch(tf.data.AUTOTUNE)
 
+    # One-hot encode labels in the dataset pipeline
+    def one_hot_labels(images, labels):
+        return images, tf.one_hot(labels, num_classes)
+
+    train_ds = train_ds.map(one_hot_labels)
+    test_ds = test_ds.map(one_hot_labels)
+
+    # Define the model
+    model = tf.keras.Sequential([
+        layers.Input(shape=(50, 67, 1)),
+        layers.Conv2D(32, (3, 3), activation='relu'),
+        layers.MaxPooling2D(),
+        layers.Conv2D(64, (3, 3), activation='relu'),
+        layers.MaxPooling2D(),
+        layers.Conv2D(128, (3, 3), activation='relu'),
+        layers.MaxPooling2D(),
+        layers.GlobalAveragePooling2D(),
+        layers.Dense(64, activation='relu'),
+        layers.Dropout(0.25),
+        layers.Dense(32, activation='relu'),
+        layers.Dense(num_classes, activation='softmax')
+    ])
+
     # model = tf.keras.Sequential([
     #     layers.Input(shape=(50, 67, 1)),
-    #     layers.Conv2D(64, (3, 3), activation='relu'),
+    #     layers.Conv2D(32, (3, 3)),
+    #     layers.BatchNormalization(),
+    #     layers.Activation('relu'),
     #     layers.MaxPooling2D(),
-    #     layers.Conv2D(128, (3, 3), activation='relu'),
+    #     layers.Conv2D(64, (3, 3)),
+    #     layers.BatchNormalization(),
+    #     layers.Activation('relu'),
     #     layers.MaxPooling2D(),
-    #     layers.Conv2D(256, (3, 3), activation='relu'),
+    #     layers.Conv2D(128, (3, 3)),
+    #     layers.BatchNormalization(),
+    #     layers.Activation('relu'),
     #     layers.MaxPooling2D(),
     #     layers.Flatten(),
     #     layers.Dense(64, activation='relu'),
+    #     layers.Dropout(0.1),
     #     layers.Dense(32, activation='relu'),
-    #     layers.Dense(6, activation='softmax')  # Adjust for the number of classes
+    #     layers.Dense(num_classes, activation='softmax')
     # ])
-    model = tf.keras.Sequential([
-        layers.Input(shape=(50, 67, 1)),
-        layers.Conv2D(32, (3, 3)),
-        layers.BatchNormalization(),
-        layers.Activation('relu'),
-        layers.MaxPooling2D(),
-        layers.Conv2D(64, (3, 3)),
-        layers.BatchNormalization(),
-        layers.Activation('relu'),
-        layers.MaxPooling2D(),
-        layers.Conv2D(128, (3, 3)),
-        layers.BatchNormalization(),
-        layers.Activation('relu'),
-        layers.MaxPooling2D(),
-        layers.Flatten(),
-        layers.Dense(64, activation='relu'),
-        layers.Dense(32, activation='relu'),
-        layers.Dense(6, activation='softmax')
-    ])
-    # Set the learning rate scheduler (Cosine Decay)
+
+    # Learning rate scheduler
     initial_learning_rate = 0.001
     lr_scheduler = CosineDecay(
         initial_learning_rate=initial_learning_rate,
-        decay_steps=10 * len(train_ds),  # Total steps for full decay (epochs * batches per epoch)
-        alpha=0.0001  # Final learning rate fraction of initial (10% of 0.001)
+        decay_steps=epochs * len(train_ds),
+        alpha=0.0001
     )
 
     optimizer = optimizers.Adam(learning_rate=lr_scheduler)
-    # model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
     model.compile(optimizer=optimizer, loss='categorical_crossentropy', metrics=['accuracy'])
-    # model.fit(train_ds, epochs=epochs, validation_data=test_ds)
 
-    # # Define the learning rate scheduler callback
-    # lr_scheduler = callbacks.ReduceLROnPlateau(
-    #     monitor='val_loss',  # Monitor validation loss
-    #     factor=0.5,  # Reduce learning rate by this factor
-    #     patience=0,  # Number of epochs with no improvement to wait before reducing
-    #     min_lr=1e-6,  # Minimum learning rate
-    #     verbose=1  # Print learning rate updates
-    # )
-
-    # Add an early stopping callback to prevent overfitting
+    # Early stopping
     early_stopping = callbacks.EarlyStopping(
         monitor='val_loss',
-        patience=5,
+        patience=3,
         restore_best_weights=True
     )
 
-    # Train the model (without passing lr_scheduler as a callback)
-    history = model.fit(
-        train_ds,
-        epochs=epochs,
-        validation_data=test_ds,
-        callbacks=[early_stopping]  # Only valid callbacks here
+    # Train the model
+    history = model.fit(train_ds, epochs=epochs, validation_data=test_ds, callbacks=[early_stopping])
+
+    # Plot Accuracy & Loss in one figure
+    fig, ax1 = plt.subplots(figsize=(10, 6))
+    ax1.plot(history.history['accuracy'], label='Train Accuracy', color='blue')
+    ax1.plot(history.history['val_accuracy'], label='Val Accuracy', color='blue', linestyle='--')
+    ax1.set_xlabel('Epoch')
+    ax1.set_ylabel('Accuracy', color='blue')
+    ax1.tick_params(axis='y', labelcolor='blue')
+
+    ax2 = ax1.twinx()
+    ax2.plot(history.history['loss'], label='Train Loss', color='red')
+    ax2.plot(history.history['val_loss'], label='Val Loss', color='red', linestyle='--')
+    ax2.set_ylabel('Loss', color='red')
+    ax2.tick_params(axis='y', labelcolor='red')
+
+    lines1, labels1 = ax1.get_legend_handles_labels()
+    lines2, labels2 = ax2.get_legend_handles_labels()
+    ax1.legend(lines1 + lines2, labels1 + labels2, loc='upper center')
+    plt.title('Epoch vs Accuracy & Loss')
+    plt.tight_layout()
+
+    # Evaluate final predictions for confusion matrix and metrics
+    x_test_list = []
+    y_test_list = []
+    for img, lbl in test_ds.unbatch():
+        x_test_list.append(img.numpy())
+        y_test_list.append(lbl.numpy())
+    x_test_np = np.array(x_test_list)
+    y_test_np = np.array(y_test_list)
+    y_true = np.argmax(y_test_np, axis=1)  # 0-based
+
+    y_pred_prob = model.predict(x_test_np)
+    y_pred = np.argmax(y_pred_prob, axis=1)
+
+    # Compute confusion matrix
+    cm = confusion_matrix(y_true, y_pred)
+    # Normalize row-wise
+    cm_normalized = cm.astype('float') / cm.sum(axis=1)[:, np.newaxis]
+
+    # Plot the normalized confusion matrix with percentages
+    plt.figure(figsize=(6, 5))
+    sns.heatmap(cm_normalized, annot=True, cmap='Blues', fmt='.2%',
+                xticklabels=range(1, num_classes + 1),
+                yticklabels=range(1, num_classes + 1))
+    plt.xlabel('Predicted Label')
+    plt.ylabel('True Label')
+    plt.title('Normalized Confusion Matrix (Percentages)')
+    plt.tight_layout()
+
+    # Compute final F1, Precision, and Recall (weighted)
+    precision, recall, f1, _ = precision_recall_fscore_support(
+        y_true, y_pred, average='weighted', zero_division=0
     )
 
-    # Train the model and store the history
-    # history = model.fit(train_ds, epochs=epochs, validation_data=test_ds, callbacks=[lr_scheduler])
-    # history = model.fit(train_ds, epochs=epochs, validation_data=test_ds)
+    # Plot F1, Precision, and Recall as bars
+    metrics = ['F1 Score', 'Precision', 'Recall']
+    values = [f1, precision, recall]
 
-    # Plot training and validation accuracy
-    plt.figure(figsize=(12, 6))
-    plt.plot(history.history['accuracy'], label='Training Accuracy')
-    plt.plot(history.history['val_accuracy'], label='Validation Accuracy', linestyle='--')
-    plt.title('Accuracy vs. Epochs')
-    plt.xlabel('Epochs')
-    plt.ylabel('Accuracy')
-    plt.legend()
-    plt.grid(True)
-
-    # Plot training and validation loss
-    plt.figure(figsize=(12, 6))
-    plt.plot(history.history['loss'], label='Training Loss')
-    plt.plot(history.history['val_loss'], label='Validation Loss', linestyle='--')
-    plt.title('Loss vs. Epochs')
-    plt.xlabel('Epochs')
-    plt.ylabel('Loss')
-    plt.legend()
-    plt.grid(True)
-
-    # steps = range(10 * len(train_ds))  # Total training steps
-    # lr_values = [lr_scheduler(step) for step in steps]
-    # plt.plot(steps, lr_values)
-    # plt.title('Learning Rate Schedule (Cosine Decay)')
-    # plt.xlabel('Training Steps')
-    # plt.ylabel('Learning Rate')
-    # plt.grid(True)
+    plt.figure(figsize=(8, 6))
+    plt.bar(metrics, values, color=['skyblue', 'green', 'orange'])
+    for i, v in enumerate(values):
+        plt.text(i, v + 0.01, f"{v:.4f}", ha='center', fontweight='bold')
+    plt.ylim(0, 1.1)
+    plt.title('Final F1, Precision, and Recall')
+    plt.ylabel('Metric Value')
+    plt.grid(axis='y')
+    plt.tight_layout()
     plt.show()
 
-    # 1
-    # model = tf.keras.Sequential([
-    #     layers.Input(shape=(50, 67, 1)),
-    #     layers.Conv2D(64, (3, 3), activation='relu'),
-    #     layers.MaxPooling2D(),
-    #     layers.Conv2D(128, (3, 3), activation='relu'),
-    #     layers.MaxPooling2D(),
-    #     layers.Conv2D(256, (3, 3), activation='relu'),
-    #     layers.MaxPooling2D(),
-    #     layers.Flatten(),
-    #     layers.Dense(64, activation='relu'),
-    #     layers.Dense(32, activation='relu'),
-    #     layers.Dense(6, activation='softmax')  # Adjust for the number of classes
-    # ])
+
+# import os
+# os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
+# import numpy as np
+# import tensorflow as tf
+# from tensorflow.keras import layers, callbacks, models, optimizers
+# from sklearn.metrics import confusion_matrix, precision_recall_fscore_support
+# import matplotlib.pyplot as plt
+# import seaborn as sns
+#
+# from tensorflow.keras.optimizers.schedules import CosineDecay
+# from PreprocessingPipeline import create_preprocessing_pipeline
+#
+# class F1MetricsCallback(tf.keras.callbacks.Callback):
+#     def __init__(self, val_data):
+#         super().__init__()
+#         self.val_data = val_data
+#         self.f1_scores = []
+#         self.precisions = []
+#         self.recalls = []
+#
+#     def on_epoch_end(self, epoch, logs=None):
+#         # Extract validation data
+#         x_val = []
+#         y_val_onehot = []
+#         for x, y in self.val_data.unbatch():
+#             x_val.append(x.numpy())
+#             y_val_onehot.append(y.numpy())
+#
+#         x_val = np.array(x_val)
+#         y_val_onehot = np.array(y_val_onehot)
+#
+#         # Get predictions
+#         y_pred_prob = self.model.predict(x_val)
+#         y_pred = np.argmax(y_pred_prob, axis=1)
+#         y_true = np.argmax(y_val_onehot, axis=1)
+#
+#         # Compute metrics
+#         precision, recall, f1, _ = precision_recall_fscore_support(
+#             y_true, y_pred, average='weighted', zero_division=0
+#         )
+#         self.f1_scores.append(f1)
+#         self.precisions.append(precision)
+#         self.recalls.append(recall)
+#
+#         print(f"Epoch {epoch+1} - F1: {f1:.4f}, Precision: {precision:.4f}, Recall: {recall:.4f}")
+#
+#
+# if __name__ == "__main__":
+#     source_path = r'D:\Data\0. Machine Learning\0. Mini_project_finger_counting\0. Data\1. New data\Dataset Ivan V3'
+#     batch_size = 16
+#     num_augmentations_per_image = 50
+#     epochs = 30
+#
+#     # Create training dataset with augmentations
+#     # Returns x, y with y in [1..5]
+#     x, y = create_preprocessing_pipeline(source_path, True, num_augmentations_per_image)
+#
+#     # Convert labels from [1..5] to [0..4] and then one-hot encode
+#     y_zero_based = y - 1
+#     num_classes = 5  # Adjust to 5 classes
+#     # We will one-hot encode inside the dataset pipeline
+#
+#     # Convert x and y into a tf.data.Dataset
+#     dataset = tf.data.Dataset.from_tensor_slices((x, y_zero_based))
+#
+#     # Shuffle the dataset
+#     dataset = dataset.shuffle(buffer_size=len(x), seed=42)
+#
+#     # Calculate split sizes
+#     dataset_size = len(x)
+#     train_size = int(0.8 * dataset_size)
+#     test_size = dataset_size - train_size
+#
+#     print(f"Batch size: {batch_size}, Epochs: {epochs}")
+#     print(f"Train set size: {train_size}, Test set size: {test_size}")
+#
+#     # Split into training and test datasets
+#     train_ds = dataset.take(train_size).batch(batch_size).prefetch(tf.data.AUTOTUNE)
+#     test_ds = dataset.skip(train_size).batch(batch_size).prefetch(tf.data.AUTOTUNE)
+#
+#     # One-hot encode labels in the dataset pipeline
+#     def one_hot_labels(images, labels):
+#         return images, tf.one_hot(labels, num_classes)
+#
+#     train_ds = train_ds.map(one_hot_labels)
+#     test_ds = test_ds.map(one_hot_labels)
+#
+#     # Define the model (similar to original, but consistent with working version)
+#     model = tf.keras.Sequential([
+#         layers.Input(shape=(50, 67, 1)),
+#         layers.Conv2D(32, (3, 3)),
+#         layers.BatchNormalization(),
+#         layers.Activation('relu'),
+#         layers.MaxPooling2D(),
+#         layers.Conv2D(64, (3, 3)),
+#         layers.BatchNormalization(),
+#         layers.Activation('relu'),
+#         layers.MaxPooling2D(),
+#         layers.Conv2D(128, (3, 3)),
+#         layers.BatchNormalization(),
+#         layers.Activation('relu'),
+#         layers.MaxPooling2D(),
+#         layers.Flatten(),
+#         layers.Dense(64, activation='relu'),
+#         layers.Dense(32, activation='relu'),
+#         layers.Dense(num_classes, activation='softmax')
+#     ])
+#
+#     # Set the learning rate scheduler (Cosine Decay)
+#     initial_learning_rate = 0.001
+#     lr_scheduler = CosineDecay(
+#         initial_learning_rate=initial_learning_rate,
+#         decay_steps=epochs * len(train_ds),  # total steps for full decay
+#         alpha=0.0001
+#     )
+#
+#     # Set the optimizer
+#     optimizer = optimizers.Adam(learning_rate=lr_scheduler)
+#
+#     # Compile the model
+#     model.compile(optimizer=optimizer, loss='categorical_crossentropy', metrics=['accuracy'])
+#
+#     # Add an early stopping callback to prevent overfitting
+#     early_stopping = callbacks.EarlyStopping(
+#         monitor='val_loss',
+#         patience=5,
+#         restore_best_weights=True
+#     )
+#
+#     # Setup callback to track F1, Precision, Recall
+#     f1_callback = F1MetricsCallback(val_data=test_ds)
+#
+#     # Train the model
+#     history = model.fit(train_ds, epochs=epochs, validation_data=test_ds,
+#                         callbacks=[early_stopping, f1_callback])
+#
+#     # Plot Accuracy & Loss in one figure
+#     fig, ax1 = plt.subplots(figsize=(10, 6))
+#     ax1.plot(history.history['accuracy'], label='Train Accuracy', color='blue')
+#     ax1.plot(history.history['val_accuracy'], label='Val Accuracy', color='blue', linestyle='--')
+#     ax1.set_xlabel('Epoch')
+#     ax1.set_ylabel('Accuracy', color='blue')
+#     ax1.tick_params(axis='y', labelcolor='blue')
+#
+#     ax2 = ax1.twinx()
+#     ax2.plot(history.history['loss'], label='Train Loss', color='red')
+#     ax2.plot(history.history['val_loss'], label='Val Loss', color='red', linestyle='--')
+#     ax2.set_ylabel('Loss', color='red')
+#     ax2.tick_params(axis='y', labelcolor='red')
+#
+#     lines1, labels1 = ax1.get_legend_handles_labels()
+#     lines2, labels2 = ax2.get_legend_handles_labels()
+#     ax1.legend(lines1 + lines2, labels1 + labels2, loc='upper center')
+#     plt.title('Epoch vs Accuracy & Loss')
+#     plt.tight_layout()
+#
+#     # Plot F1, Precision, and Recall in one figure
+#     # F1 as a bar chart, Precision and Recall as line charts
+#     epochs_range = range(1, len(f1_callback.f1_scores) + 1)
+#     plt.figure(figsize=(10,6))
+#
+#     # Plot F1 as bar
+#     plt.bar(epochs_range, f1_callback.f1_scores, color='skyblue', label='F1 Score')
+#
+#     # Plot Precision and Recall as lines
+#     plt.plot(epochs_range, f1_callback.precisions, color='green', marker='o', label='Precision')
+#     plt.plot(epochs_range, f1_callback.recalls, color='orange', marker='s', label='Recall')
+#
+#     plt.xlabel('Epoch')
+#     plt.ylabel('Metric Value')
+#     plt.title('F1, Precision, and Recall over Epochs')
+#     plt.xticks(epochs_range)
+#     plt.grid(True)
+#     plt.legend()
+#     plt.tight_layout()
+#
+#     # Evaluate final predictions for confusion matrix
+#     x_test_list = []
+#     y_test_list = []
+#     for img, lbl in test_ds.unbatch():
+#         x_test_list.append(img.numpy())
+#         y_test_list.append(lbl.numpy())
+#     x_test_np = np.array(x_test_list)
+#     y_test_np = np.array(y_test_list)
+#     y_true = np.argmax(y_test_np, axis=1)  # 0-based
+#
+#     y_pred_prob = model.predict(x_test_np)
+#     y_pred = np.argmax(y_pred_prob, axis=1)
+#
+#     # Compute confusion matrix
+#     cm = confusion_matrix(y_true, y_pred)
+#
+#     # Normalize the confusion matrix row-wise (true class-wise)
+#     cm_normalized = cm.astype('float') / cm.sum(axis=1)[:, np.newaxis]
+#
+#     # Plot the normalized confusion matrix with percentages
+#     plt.figure(figsize=(6, 5))
+#     sns.heatmap(cm_normalized, annot=True, cmap='Blues', fmt='.2%',
+#                 xticklabels=range(1, num_classes+1),
+#                 yticklabels=range(1, num_classes+1))
+#     plt.xlabel('Predicted Label')
+#     plt.ylabel('True Label')
+#     plt.title('Normalized Confusion Matrix (Percentages)')
+#     plt.tight_layout()
+#     plt.show()
