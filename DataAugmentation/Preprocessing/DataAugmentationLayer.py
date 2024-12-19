@@ -5,7 +5,6 @@ import math
 class DataAugmentationLayer(tf.keras.layers.Layer):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        # You can add any initialization parameters if needed.
 
     def call(self, images, training=None):
         # images expected shape: (batch, h, w, 1) after grayscale conversion
@@ -22,10 +21,10 @@ class DataAugmentationLayer(tf.keras.layers.Layer):
             images = self.random_scale(images)
         return images
 
+    # Apply random rotation between 0-15 degrees or 345-360 degrees
     def random_rotate(self, images, corner_mean_expanded):
         batch_size = tf.shape(images)[0]
 
-        # 50% chance to pick angle from 0-15 degrees, else 345-360
         choose_low_range = tf.random.uniform([batch_size], 0, 1) > 0.5
         low_angles = tf.random.uniform([batch_size], 0, math.radians(15))
         high_angles = tf.random.uniform([batch_size], math.radians(345), math.radians(360))
@@ -35,12 +34,12 @@ class DataAugmentationLayer(tf.keras.layers.Layer):
         rotated_images_filled = self.fill_black_with_mean(rotated_images, corner_mean_expanded)
         return rotated_images_filled
 
+    # Apply random translation between -15% and 15%
     def random_translate(self, images, corner_mean_expanded):
         batch_size = tf.shape(images)[0]
         h = tf.shape(images)[1]
         w = tf.shape(images)[2]
 
-        # Translate between -15% and 15% of the dimensions
         tx = tf.random.uniform([batch_size], -0.15, 0.15) * tf.cast(h, tf.float32)
         ty = tf.random.uniform([batch_size], -0.15, 0.15) * tf.cast(w, tf.float32)
 
@@ -49,8 +48,9 @@ class DataAugmentationLayer(tf.keras.layers.Layer):
         translated_images_filled = self.fill_black_with_mean(translated_images, corner_mean_expanded)
         return translated_images_filled
 
+    # Extract the mean of the four corners of the image
+    # This is used to fill black pixels with the mean value
     def extract_corner_mean(self, images):
-        # images: (batch, h, w, 1)
         batch_size = tf.shape(images)[0]
         h = tf.shape(images)[1]
         w = tf.shape(images)[2]
@@ -67,6 +67,7 @@ class DataAugmentationLayer(tf.keras.layers.Layer):
         corner_mean_expanded = tf.reshape(corner_mean, [batch_size, 1, 1, 1])
         return corner_mean_expanded
 
+    # Fill black pixels with the mean of the four corners
     def fill_black_with_mean(self, images, corner_mean_expanded):
         # Identify black pixels (exact match or use a threshold if needed)
         mask = tf.equal(images, 0.0)
@@ -76,8 +77,8 @@ class DataAugmentationLayer(tf.keras.layers.Layer):
         images_filled = images * (1 - mask) + corner_mean_expanded * mask
         return images_filled
 
+    # Randomly scale images by a factor in the range [0.9, 1.1]
     def random_scale(self, images):
-        # Random zoom by scaling in the range [0.9, 1.1]
         batch_size = tf.shape(images)[0]
         scale_factors = tf.random.uniform([batch_size], 0.9, 1.1)
 
@@ -98,26 +99,47 @@ class DataAugmentationLayer(tf.keras.layers.Layer):
         )
         return images_list
 
+    # Randomly adjust brightness in a range of [-0.2, 0.2]
     def random_brightness(self, images):
-        # Adjust brightness by a random factor in range [-0.2, 0.2]
         images = tf.image.random_brightness(images, max_delta=0.2)
         return images
 
+    # Randomly apply a Gaussian blur or sharpening filter to the images
     def random_focus(self, images):
-        # Randomly choose to blur or not using tfa's gaussian_filter2d
         batch_size = tf.shape(images)[0]
-        blur_prob = tf.random.uniform([batch_size], 0, 1) > 0.5
+        random_choice = tf.random.uniform([batch_size], 0, 1)
 
-        def maybe_blur(img, apply_blur):
+        # Define the sharpening kernel
+        sharpen_kernel = tf.constant(
+            [[0, -1, 0],
+             [-1, 5, -1],
+             [0, -1, 0]], dtype=tf.float32
+        )
+        sharpen_kernel = tf.reshape(sharpen_kernel, [3, 3, 1, 1])
+
+        def apply_gaussian_blur(img):
+            return tfa.image.gaussian_filter2d(img, filter_shape=(3, 3), sigma=1.0)
+
+        def apply_sharpening(img):
+            img = tf.expand_dims(img, axis=0)  # Add batch dimension
+            img = tf.nn.depthwise_conv2d(img, filter=sharpen_kernel, strides=[1, 1, 1, 1], padding='SAME')
+            return tf.squeeze(img, axis=0)  # Remove batch dimension
+
+        def process_image(img, choice):
             return tf.cond(
-                apply_blur,
-                lambda: tfa.image.gaussian_filter2d(img, filter_shape=(3,3), sigma=1.0),
-                lambda: img
+                choice < 0.33,  # Apply Gaussian blur
+                lambda: apply_gaussian_blur(img),
+                lambda: tf.cond(
+                    choice < 0.66,  # Apply sharpening
+                    lambda: apply_sharpening(img),
+                    lambda: img  # Do nothing
+                )
             )
 
+        # Apply the processing to each image in the batch
         images = tf.map_fn(
-            lambda x: maybe_blur(x[0], x[1]),
-            (images, blur_prob),
+            lambda x: process_image(x[0], x[1]),
+            (images, random_choice),
             fn_output_signature=tf.float32
         )
         return images
